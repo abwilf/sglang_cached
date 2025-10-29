@@ -30,10 +30,34 @@ def openai_to_sglang(openai_request: Dict[str, Any], is_chat: bool = False) -> D
     """
     sglang_request = {}
 
+    # Preserve model name for cache key generation
+    if "model" in openai_request:
+        sglang_request["model"] = openai_request["model"]
+
     # Handle input
     if is_chat:
-        # Chat completion - use messages
-        sglang_request["text"] = openai_request.get("messages", [])
+        # Chat completion - format messages as a conversation string
+        # SGLang's /generate endpoint expects a string, not a messages array
+        messages = openai_request.get("messages", [])
+
+        # Format messages into a conversational string
+        # This is a simple approach - a more sophisticated version would use the model's chat template
+        formatted_text = ""
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                formatted_text += f"System: {content}\n\n"
+            elif role == "user":
+                formatted_text += f"User: {content}\n\n"
+            elif role == "assistant":
+                formatted_text += f"Assistant: {content}\n\n"
+
+        # Add a prompt for the assistant to continue
+        if messages and messages[-1].get("role") == "user":
+            formatted_text += "Assistant:"
+
+        sglang_request["text"] = formatted_text
     else:
         # Text completion - use prompt
         sglang_request["text"] = openai_request.get("prompt", "")
@@ -218,21 +242,18 @@ class CachedSGLangServer:
             """
             OpenAI-compatible /v1/chat/completions endpoint with caching.
 
-            Converts OpenAI format to SGLang, processes with caching, and converts back.
+            Forwards directly to SGLang's /v1/chat/completions endpoint to avoid conversion issues.
             """
             openai_request = await request.json()
 
-            # Transform to SGLang format
+            # Use the OpenAI request directly as the cache key
+            # We need to convert it to a format compatible with our cache hashing
             sglang_request = openai_to_sglang(openai_request, is_chat=True)
 
-            # Process with caching
-            sglang_response = self._handle_generate(sglang_request)
+            # Process with caching, but use chat completions endpoint
+            sglang_response = self._handle_chat_completions(openai_request, sglang_request)
 
-            # Transform back to OpenAI format
-            model = openai_request.get("model", "sglang")
-            openai_response = sglang_to_openai(sglang_response, is_chat=True, model=model)
-
-            return openai_response
+            return sglang_response
 
     def _handle_generate(self, request_data: Dict[str, Any]) -> Union[Dict, List[Dict]]:
         """
@@ -259,6 +280,9 @@ class CachedSGLangServer:
         if num_needed > 0:
             # Create modified request for SGLang
             sglang_request = request_data.copy()
+
+            # Remove model field (used for caching only, not for SGLang API)
+            sglang_request.pop("model", None)
 
             # Update n parameter in the request
             if "sampling_params" in sglang_request:
@@ -300,6 +324,94 @@ class CachedSGLangServer:
             return all_responses[0]
         else:
             return all_responses
+
+    def _handle_chat_completions(self, openai_request: Dict[str, Any], cache_key_request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle a chat completions request with caching logic.
+        Forwards to SGLang's /v1/chat/completions endpoint directly.
+
+        Args:
+            openai_request: Original OpenAI-formatted request
+            cache_key_request: Converted request for cache key generation
+
+        Returns:
+            OpenAI-formatted chat completion response
+        """
+        n = openai_request.get("n", 1)
+
+        # Check cache using the cache_key_request
+        cached_responses, num_needed = self.cache.get(cache_key_request)
+
+        if self.verbose:
+            num_cached = len(cached_responses)
+            cache_status = "hit" if num_needed == 0 else "partial" if num_cached > 0 else "miss"
+            print(f"[Cache {cache_status}] Cached: {num_cached}/{n}, Need: {num_needed}")
+
+        # If we need more responses, call SGLang's chat completions endpoint
+        new_responses = []
+        if num_needed > 0:
+            # Create modified request for SGLang
+            sglang_request = openai_request.copy()
+            sglang_request["n"] = num_needed
+
+            # Call SGLang's /v1/chat/completions endpoint
+            try:
+                response = requests.post(
+                    f"{self.sglang_url}/v1/chat/completions",
+                    json=sglang_request,
+                    timeout=300  # 5 minute timeout for long generations
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                # Extract choices from OpenAI response format
+                # We need to store individual responses for caching
+                if "choices" in result:
+                    for choice in result["choices"]:
+                        # Store each choice as a separate response for caching
+                        # Convert to the format expected by cache (similar to SGLang /generate format)
+                        if "message" in choice and "content" in choice["message"]:
+                            new_responses.append({"text": choice["message"]["content"]})
+
+                # Update cache asynchronously with original request
+                if new_responses:
+                    self.cache.put(cache_key_request, new_responses)
+
+            except requests.exceptions.RequestException as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to connect to SGLang server at {self.sglang_url}: {str(e)}"
+                )
+
+        # Merge cached and new responses
+        all_responses = cached_responses + new_responses
+
+        # Convert cached responses back to OpenAI chat format
+        choices = []
+        for idx, resp in enumerate(all_responses[:n]):
+            choice = {
+                "index": idx,
+                "message": {
+                    "role": "assistant",
+                    "content": resp.get("text", "")
+                },
+                "finish_reason": "stop"
+            }
+            choices.append(choice)
+
+        # Return in OpenAI chat completion format
+        return {
+            "id": f"chatcmpl-{hash(str(openai_request))}",
+            "object": "chat.completion",
+            "created": int(__import__('time').time()),
+            "model": openai_request.get("model", "sglang"),
+            "choices": choices,
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0
+            }
+        }
 
     def run(self, host: str = "0.0.0.0", port: int = 30001):
         """
