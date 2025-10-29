@@ -23,13 +23,27 @@ def normalize_request(request_data: Dict[str, Any]) -> Dict[str, Any]:
     The `n` parameter is excluded because we want to reuse cached responses regardless
     of how many completions are requested.
 
+    IMPORTANT: The `model` parameter is REQUIRED. Different models produce different
+    responses, so the model must always be part of the cache key.
+
     Args:
         request_data: The raw request dictionary
 
     Returns:
         Normalized request dictionary with sorted keys and `n` removed
+
+    Raises:
+        ValueError: If the `model` field is missing from the request
     """
     import copy
+
+    # Validate that model is present
+    if "model" not in request_data:
+        raise ValueError(
+            "The 'model' field is required in all requests. "
+            "Different models produce different responses, so the model must be specified "
+            "to ensure correct cache behavior."
+        )
 
     # Deep copy to avoid modifying the original
     normalized = copy.deepcopy(request_data)

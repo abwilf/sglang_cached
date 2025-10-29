@@ -17,6 +17,7 @@ class TestNormalization:
         """Test normalization with text input."""
         request = {
             "text": "Hello world",
+            "model": "test-model",
             "sampling_params": {
                 "temperature": 0.8,
                 "max_new_tokens": 100,
@@ -38,6 +39,7 @@ class TestNormalization:
             "messages": [
                 {"role": "user", "content": "Hello"}
             ],
+            "model": "test-model",
             "sampling_params": {
                 "temperature": 0.7
             }
@@ -51,6 +53,7 @@ class TestNormalization:
         """Test that n parameter is excluded from normalized request."""
         request = {
             "text": "Test",
+            "model": "test-model",
             "sampling_params": {
                 "temperature": 0.5,
                 "n": 10,
@@ -111,6 +114,7 @@ class TestCacheKey:
         """Same request should generate same cache key."""
         request = {
             "text": "Hello",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8, "max_new_tokens": 100}
         }
 
@@ -123,10 +127,12 @@ class TestCacheKey:
         """Different n values should generate same cache key."""
         request1 = {
             "text": "Hello",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8, "n": 1}
         }
         request2 = {
             "text": "Hello",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8, "n": 5}
         }
 
@@ -139,10 +145,12 @@ class TestCacheKey:
         """Different temperature should generate different cache key."""
         request1 = {
             "text": "Hello",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8}
         }
         request2 = {
             "text": "Hello",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.9}
         }
 
@@ -155,10 +163,12 @@ class TestCacheKey:
         """Different input text should generate different cache key."""
         request1 = {
             "text": "Hello",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8}
         }
         request2 = {
             "text": "Hi",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8}
         }
 
@@ -171,6 +181,7 @@ class TestCacheKey:
         """Cache key should be deterministic across calls."""
         request = {
             "text": "Test",
+            "model": "test-model",
             "sampling_params": {
                 "temperature": 0.7,
                 "top_p": 0.9,
@@ -185,7 +196,7 @@ class TestCacheKey:
 
     def test_key_is_hex_string(self):
         """Cache key should be a valid hex string."""
-        request = {"text": "Test"}
+        request = {"text": "Test", "model": "test-model"}
         key = generate_cache_key(request)
 
         assert isinstance(key, str)
@@ -253,11 +264,13 @@ class TestCacheKey:
         """Different logprobs setting should generate different cache key."""
         request1 = {
             "text": "Hello",
+            "model": "test-model",
             "logprobs": True,
             "sampling_params": {"temperature": 0.8}
         }
         request2 = {
             "text": "Hello",
+            "model": "test-model",
             "logprobs": False,
             "sampling_params": {"temperature": 0.8}
         }
@@ -271,11 +284,13 @@ class TestCacheKey:
         """Different response_format should generate different cache key."""
         request1 = {
             "text": "Hello",
+            "model": "test-model",
             "response_format": {"type": "json_object"},
             "sampling_params": {"temperature": 0.8}
         }
         request2 = {
             "text": "Hello",
+            "model": "test-model",
             "response_format": {"type": "text"},
             "sampling_params": {"temperature": 0.8}
         }
@@ -289,11 +304,13 @@ class TestCacheKey:
         """Different tools should generate different cache key."""
         request1 = {
             "text": "Hello",
+            "model": "test-model",
             "tools": [{"type": "function", "function": {"name": "get_weather"}}],
             "sampling_params": {"temperature": 0.8}
         }
         request2 = {
             "text": "Hello",
+            "model": "test-model",
             "tools": [{"type": "function", "function": {"name": "get_time"}}],
             "sampling_params": {"temperature": 0.8}
         }
@@ -388,6 +405,7 @@ class TestNParameterExtraction:
         """Extract n from sampling_params."""
         request = {
             "text": "Test",
+            "model": "test-model",
             "sampling_params": {"n": 5}
         }
         assert extract_n_parameter(request) == 5
@@ -396,19 +414,21 @@ class TestNParameterExtraction:
         """Extract n from top level (OpenAI format)."""
         request = {
             "text": "Test",
+            "model": "test-model",
             "n": 3
         }
         assert extract_n_parameter(request) == 3
 
     def test_default_to_one(self):
         """Default to 1 if n not present."""
-        request = {"text": "Test"}
+        request = {"text": "Test", "model": "test-model"}
         assert extract_n_parameter(request) == 1
 
     def test_sampling_params_takes_precedence(self):
         """sampling_params.n takes precedence over top-level n."""
         request = {
             "text": "Test",
+            "model": "test-model",
             "n": 3,
             "sampling_params": {"n": 5}
         }

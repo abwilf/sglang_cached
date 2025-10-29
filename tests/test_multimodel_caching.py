@@ -48,22 +48,19 @@ class TestMultiModelCacheKeys:
 
         assert key1 == key2 == key3
 
-    def test_model_vs_no_model(self):
-        """Request with model should have different key than without model."""
-        request_with_model = {
-            "text": "Test",
-            "model": "gpt-4",
-            "sampling_params": {"temperature": 0.7}
-        }
+    def test_model_required(self):
+        """Request without model should raise ValueError."""
         request_without_model = {
             "text": "Test",
             "sampling_params": {"temperature": 0.7}
         }
 
-        key1 = generate_cache_key(request_with_model)
-        key2 = generate_cache_key(request_without_model)
+        # Should raise ValueError since model is required
+        with pytest.raises(ValueError) as exc_info:
+            generate_cache_key(request_without_model)
 
-        assert key1 != key2
+        assert "model" in str(exc_info.value).lower()
+        assert "required" in str(exc_info.value).lower()
 
     def test_model_with_different_params(self):
         """Same model with different params should have different keys."""
@@ -276,16 +273,19 @@ class TestMultiModelNormalization:
         assert "model" in normalized
         assert normalized["model"] == "gpt-4-turbo"
 
-    def test_normalization_without_model(self):
-        """Normalization should work fine without model field."""
+    def test_normalization_requires_model(self):
+        """Normalization should require model field."""
         request = {
             "text": "Test",
             "sampling_params": {"temperature": 0.5}
         }
-        normalized = normalize_request(request)
 
-        assert "model" not in normalized
-        assert "text" in normalized
+        # Should raise ValueError since model is required
+        with pytest.raises(ValueError) as exc_info:
+            normalize_request(request)
+
+        assert "model" in str(exc_info.value).lower()
+        assert "required" in str(exc_info.value).lower()
 
     def test_normalization_preserves_model_case(self):
         """Model name case should be preserved."""
@@ -396,7 +396,7 @@ class TestMultiModelEdgeCases:
     """Test edge cases in multi-model caching."""
 
     def test_empty_model_string(self):
-        """Empty string model should be treated differently from no model."""
+        """Empty string model is valid, but no model should raise error."""
         with tempfile.TemporaryDirectory() as tmpdir:
             cache = CacheManager(cache_dir=tmpdir)
 
@@ -410,10 +410,16 @@ class TestMultiModelEdgeCases:
                 "sampling_params": {"temperature": 0.7}
             }
 
+            # Empty string model is technically valid (even if unusual)
             key1 = generate_cache_key(request_empty)
-            key2 = generate_cache_key(request_none)
+            assert key1 is not None
 
-            assert key1 != key2
+            # No model should raise ValueError
+            with pytest.raises(ValueError) as exc_info:
+                generate_cache_key(request_none)
+
+            assert "model" in str(exc_info.value).lower()
+            assert "required" in str(exc_info.value).lower()
 
             cache.shutdown()
 

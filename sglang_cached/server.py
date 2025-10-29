@@ -27,12 +27,19 @@ def openai_to_sglang(openai_request: Dict[str, Any], is_chat: bool = False) -> D
 
     Returns:
         SGLang-formatted request
+
+    Raises:
+        HTTPException: If the 'model' field is missing from the request
     """
     sglang_request = {}
 
-    # Preserve model name for cache key generation
-    if "model" in openai_request:
-        sglang_request["model"] = openai_request["model"]
+    # Model is REQUIRED for proper cache key generation
+    if "model" not in openai_request:
+        raise HTTPException(
+            status_code=400,
+            detail="The 'model' field is required in all requests"
+        )
+    sglang_request["model"] = openai_request["model"]
 
     # Handle input
     if is_chat:
@@ -192,8 +199,17 @@ class CachedSGLangServer:
             SGLang native /generate endpoint with caching.
 
             Forwards requests to underlying SGLang server, using cache when possible.
+            Requires a 'model' field in the request for proper caching.
             """
             request_data = await request.json()
+
+            # Validate that model is present
+            if "model" not in request_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="The 'model' field is required in all requests"
+                )
+
             return await self._handle_generate(request_data)
 
         @self.app.get("/cache/stats")

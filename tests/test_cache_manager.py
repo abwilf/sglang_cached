@@ -33,6 +33,7 @@ class TestCacheBasics:
         """Test behavior with empty cache."""
         request = {
             "text": "Hello",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8, "n": 1}
         }
 
@@ -45,6 +46,7 @@ class TestCacheBasics:
         """Test full cache hit when enough responses cached."""
         request = {
             "text": "Hello",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8, "n": 2}
         }
 
@@ -68,6 +70,7 @@ class TestCacheBasics:
         """Test partial cache hit when some responses cached."""
         request = {
             "text": "Hello",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8, "n": 5}
         }
 
@@ -92,6 +95,7 @@ class TestNParameterLogic:
         """Test with n=1."""
         request = {
             "text": "Test",
+            "model": "test-model",
             "sampling_params": {"n": 1}
         }
 
@@ -108,6 +112,7 @@ class TestNParameterLogic:
         """Test requesting increasing n values."""
         request_base = {
             "text": "Test",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8}
         }
 
@@ -138,6 +143,7 @@ class TestNParameterLogic:
         """Test that put() appends to existing cache."""
         request = {
             "text": "Test",
+            "model": "test-model",
             "sampling_params": {"n": 1}
         }
 
@@ -161,6 +167,7 @@ class TestPersistence:
         """Test that cache is saved to disk and can be loaded."""
         request = {
             "text": "Persistent test",
+            "model": "test-model",
             "sampling_params": {"temperature": 0.8, "n": 1}
         }
         responses = [{"text": "response", "meta_info": {"id": "1"}}]
@@ -192,6 +199,7 @@ class TestStats:
         """Test that stats are tracked correctly."""
         request = {
             "text": "Test",
+            "model": "test-model",
             "sampling_params": {"n": 1}
         }
 
@@ -215,7 +223,7 @@ class TestStats:
 
     def test_clear_cache(self, cache_manager):
         """Test clearing the cache."""
-        request = {"text": "Test", "sampling_params": {"n": 1}}
+        request = {"text": "Test", "model": "test-model", "sampling_params": {"n": 1}}
         cache_manager.put(request, [{"text": "r", "meta_info": {}}])
 
         # Verify it's there
