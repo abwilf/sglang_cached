@@ -1,92 +1,221 @@
 # SGLang-Cached
 
-An elegant, minimal caching wrapper for [SGLang](https://github.com/sgl-project/sglang) that dramatically speeds up repeated inference requests.
+An HTTP wrapper server for [SGLang](https://github.com/sgl-project/sglang) that adds intelligent response caching with support for both SGLang and OpenAI-compatible APIs.
 
 ## Features
 
-- **Transparent Caching**: Drop-in wrapper that caches SGLang responses automatically
+- **HTTP Proxy Server**: Standalone server that wraps any SGLang instance
+- **Dual API Support**: Both SGLang native and OpenAI-compatible endpoints
 - **Smart `n` Parameter Handling**: Intelligently reuses cached completions when generating multiple responses
 - **Async File Persistence**: In-memory cache with non-blocking disk writes
-- **Minimal Code**: Clean, simple implementation with comprehensive tests
 - **Zero Configuration**: Works out of the box with sensible defaults
+- **Language Agnostic**: Use from any language via HTTP (curl, Python requests, Node.js fetch, etc.)
 
 ## Installation
-
 ```bash
-pip install sglang-cached
-```
-
-Or install from source:
-
-```bash
-git clone https://github.com/yourusername/sglang-cached.git
+git clone https://github.com/abwilf/sglang-cached.git
 cd sglang-cached
 pip install -e .
 ```
 
 ## Quick Start
 
-### Basic Usage
+### 1. Start Your SGLang Server
 
-```python
-from sglang_cached import CachedSGLangServer
-
-# Create a cached server wrapper
-server = CachedSGLangServer(
-    sglang_url="http://127.0.0.1:30000",
-    cache_dir="~/.sglang_cache",  # Optional, this is the default
-    verbose=True  # Print cache hit statistics
-)
-
-# Make requests just like with SGLang
-request = {
-    "text": "What is the capital of France?",
-    "sampling_params": {
-        "temperature": 0.8,
-        "max_new_tokens": 100
-    }
-}
-
-# First request: cache miss, calls SGLang
-response1 = server.generate(request)
-
-# Second request: cache hit, instant response!
-response2 = server.generate(request)
-
-# Check cache statistics
-stats = server.get_cache_stats()
-print(f"Hit rate: {stats['hit_rate']:.2%}")
-
-# Clean shutdown
-server.shutdown()
+```bash
+python -m sglang.launch_server --model-path meta-llama/Llama-2-7b-chat-hf --port 30000
 ```
 
-### The `n` Parameter Magic
+### 2. Start the Cached Wrapper Server
+
+```bash
+sglang-cached start --sglang-url http://localhost:30000 --port 30001
+```
+
+### 3. Make Requests to the cached wrapper server
+Want to test quickly? Use these ultra-small models that load in seconds:
+
+#### Terminal 1: Start SGLang Server
+
+```bash
+# TinyLlama 1.1B (recommended for testing - ~2GB download)
+python -m sglang.launch_server \
+  --model-path TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
+  --port 30000
+
+# Or even smaller: Qwen 0.5B (~1GB download)
+python -m sglang.launch_server \
+  --model-path Qwen/Qwen2.5-0.5B-Instruct \
+  --port 30000
+```
+
+#### Terminal 2: Start Cached Wrapper
+
+```bash
+sglang-cached start \
+  --sglang-url http://localhost:30000 \
+  --port 30001 \
+  --cache-path /tmp/test_cache
+```
+
+#### Terminal 3: Test Caching
+
+```bash
+# Test 1: Cache miss (will take ~1-2 seconds)
+curl -X POST http://localhost:30001/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The capital of France is",
+    "sampling_params": {"temperature": 0.0, "max_new_tokens": 100}
+  }' | jq .
+
+# Test 2: Cache hit (instant! <1ms)
+curl -X POST http://localhost:30001/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The capital of France is",
+    "sampling_params": {"temperature": 0.0, "max_new_tokens": 10}
+  }' | jq .
+
+# Test 3: Check cache stats
+curl http://localhost:30001/cache/stats | jq .
+
+# Test 4: Test n parameter (reuses 1 cached, generates 2 more)
+curl -X POST http://localhost:30001/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The capital of France is",
+    "sampling_params": {"temperature": 0.0, "max_new_tokens": 10, "n": 3}
+  }' | jq 'length'
+
+# Test 5: OpenAI API format
+curl -X POST http://localhost:30001/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "tinyllama",
+    "messages": [{"role": "user", "content": "What is 2+2?"}],
+    "max_tokens": 20
+  }' | jq .
+```
+
+**Python quick test:**
+
+```python
+import requests
+
+base_url = "http://localhost:30001"
+
+# Cache miss
+resp1 = requests.post(f"{base_url}/generate", json={
+    "text": "2+2=",
+    "sampling_params": {"temperature": 0.0, "max_new_tokens": 5}
+})
+print("First request:", resp1.json()["text"])
+
+# Cache hit (instant!)
+resp2 = requests.post(f"{base_url}/generate", json={
+    "text": "2+2=",
+    "sampling_params": {"temperature": 0.0, "max_new_tokens": 5}
+})
+print("Second request:", resp2.json()["text"])
+
+# Check stats
+stats = requests.get(f"{base_url}/cache/stats").json()
+print(f"Hit rate: {stats['hit_rate']:.2%}")
+```
+
+Look for `[Cache hit]` or `[Cache miss]` messages in Terminal 2 to see caching in action!
+
+## Using with OpenAI Client Libraries
+
+The OpenAI-compatible endpoints work with standard OpenAI client libraries:
+
+**Python:**
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:30001/v1",
+    api_key="dummy"  # Not validated, but required by client
+)
+
+response = client.chat.completions.create(
+    model="llama-2-7b",
+    messages=[{"role": "user", "content": "Hello!"}],
+    max_tokens=100
+)
+print(response.choices[0].message.content)
+```
+
+## Available Endpoints
+
+### SGLang Native API
+
+- `POST /generate` - Generate completions (SGLang format)
+
+### OpenAI-Compatible API
+
+- `POST /v1/completions` - Text completions (OpenAI format)
+- `POST /v1/chat/completions` - Chat completions (OpenAI format)
+
+### Cache Management
+
+- `GET /cache/stats` - Get cache statistics
+- `POST /cache/clear` - Clear all cached responses
+- `GET /cache/info` - Detailed cache information
+- `GET /health` - Health check
+
+## The `n` Parameter Magic
 
 The `n` parameter controls how many completions to generate. SGLang-Cached handles this intelligently:
 
-```python
-# Generate 1 completion
-request = {
-    "text": "Once upon a time",
-    "sampling_params": {"temperature": 0.9, "n": 1, "max_new_tokens": 50}
-}
-response1 = server.generate(request)  # Cache miss: generates 1
+```bash
+# Request 1: Generate 1 completion (cache miss)
+curl -X POST http://localhost:30001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Once upon a time", "sampling_params": {"temperature": 0.9, "n": 1, "max_new_tokens": 50}}'
 
-# Generate 3 completions with same parameters
-request["sampling_params"]["n"] = 3
-response3 = server.generate(request)  # Cache hit: reuses 1, generates 2 more
-# Returns list of 3 completions (1 cached + 2 new)
+# Request 2: Generate 3 completions (reuses 1 cached, generates 2 more)
+curl -X POST http://localhost:30001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Once upon a time", "sampling_params": {"temperature": 0.9, "n": 3, "max_new_tokens": 50}}'
 
-# Generate 5 completions
-request["sampling_params"]["n"] = 5
-response5 = server.generate(request)  # Cache hit: reuses 3, generates 2 more
-# Returns list of 5 completions (3 cached + 2 new)
+# Request 3: Generate 5 completions (reuses 3 cached, generates 2 more)
+curl -X POST http://localhost:30001/generate \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Once upon a time", "sampling_params": {"temperature": 0.9, "n": 5, "max_new_tokens": 50}}'
 ```
 
 The cache stores multiple completions per unique prompt+parameters combination (excluding `n`), so you can efficiently generate different numbers of completions without re-running inference.
 
 ## How It Works
+
+### Architecture
+
+```
+┌─────────────────┐
+│  Client         │ (any language - curl, Python, Node.js, etc.)
+│  (HTTP request) │
+└────────┬────────┘
+         │
+         ▼
+┌──────────────────────┐
+│  Cached Wrapper      │ ◄── Check in-memory cache
+│  Server (port 30001) │
+└────────┬─────────────┘
+         │ if cache miss
+         ▼
+┌──────────────────────┐
+│  SGLang Server       │ ◄── Forward request
+│  (port 30000)        │
+└────────┬─────────────┘
+         │ response
+         ▼
+┌──────────────────────┐
+│  Cache Manager       │ ◄── Async disk persistence
+└──────────────────────┘
+```
 
 ### Cache Key Generation
 
@@ -102,83 +231,35 @@ This means two requests with different `n` values but identical other parameters
 ### Cache Storage
 
 - **In-memory**: Fast dictionary-based cache for instant lookups
-- **On-disk**: JSON Lines format for persistence across restarts
+- **On-disk**: JSON Lines format for persistence across server restarts
 - **Async writes**: File updates happen in a background thread, never blocking requests
 
-### Architecture
-
-```
-┌─────────────────┐
-│  Your Code      │
-└────────┬────────┘
-         │ request
-         ▼
-┌─────────────────┐
-│ CachedSGLangServer │ ◄── Check in-memory cache
-└────────┬────────┘
-         │ if needed
-         ▼
-┌─────────────────┐
-│ SGLang Server   │ ◄── Forward partial/full requests
-└────────┬────────┘
-         │ response
-         ▼
-┌─────────────────┐
-│ Cache Manager   │ ◄── Async disk persistence
-└─────────────────┘
-```
-
-## CLI Usage
-
-Start an SGLang server with caching:
+## CLI Reference
 
 ```bash
-# Start a new SGLang server with caching
-sglang-cached \
-    --model-path meta-llama/Llama-2-7b-chat-hf \
-    --cache-dir ~/.sglang_cache \
-    --port 30000
-
-# Connect to an existing SGLang server
-sglang-cached \
-    --use-existing-server \
-    --sglang-port 30000 \
-    --cache-dir ~/.sglang_cache
+sglang-cached start \
+  --sglang-url http://localhost:30000  # Required: URL of SGLang server
+  --port 30001                          # Optional: Wrapper server port (default: 30001)
+  --host 0.0.0.0                        # Optional: Host to bind to (default: 0.0.0.0)
+  --cache-path /path/to/cache           # Optional: Cache directory (default: ~/.sglang_cache)
+  --quiet                               # Optional: Disable verbose logging
 ```
 
-## API Reference
+## Checking Cache Statistics
 
-### `CachedSGLangServer`
+```bash
+# Get cache stats
+curl http://localhost:30001/cache/stats
 
-```python
-CachedSGLangServer(
-    sglang_url: str = "http://127.0.0.1:30000",
-    cache_dir: Optional[str] = None,  # Default: ~/.sglang_cache
-    verbose: bool = True
-)
-```
-
-**Methods:**
-
-- `generate(request_data: Dict) -> Union[Dict, List[Dict]]`: Generate responses with caching
-- `get_cache_stats() -> Dict`: Get cache statistics (hits, misses, hit rate, etc.)
-- `clear_cache()`: Clear all cached responses
-- `shutdown()`: Shutdown cache manager and flush pending writes
-
-### Cache Statistics
-
-```python
-stats = server.get_cache_stats()
-
-# Returns:
+# Example response:
 # {
-#     "num_keys": 42,           # Number of unique cache keys
-#     "total_responses": 156,   # Total cached responses
-#     "hits": 89,               # Cache hits
-#     "misses": 34,             # Cache misses
-#     "hit_rate": 0.723,        # Hit rate (hits / total)
-#     "cache_file": "...",      # Path to cache file
-#     "pending_writes": 0       # Queued async writes
+#   "num_keys": 42,
+#   "total_responses": 156,
+#   "hits": 89,
+#   "misses": 34,
+#   "hit_rate": 0.723,
+#   "cache_file": "/home/user/.sglang_cache/cache.jsonl",
+#   "pending_writes": 0
 # }
 ```
 
@@ -190,7 +271,7 @@ SGLang-Cached adds minimal overhead:
 - **Cache miss**: < 1ms overhead + SGLang inference time
 - **Write latency**: 0ms (async background writes)
 
-For repeated experiments or requests, expect 100-1000x speedups from cache hits!
+For repeated experiments or requests, expect **100-1000x speedups** from cache hits!
 
 ## Comparison with SGLang's RadixCache
 
@@ -213,69 +294,56 @@ SGLang has a built-in [RadixCache](https://lmsys.org/blog/2024-01-17-sglang/#rad
 - **Development**: Fast iteration during prompt engineering
 - **Batch processing**: Dedup requests in large-scale inference jobs
 - **Production**: Cache common queries in user-facing applications
-
-## Configuration
-
-### Cache Directory
-
-Default: `~/.sglang_cache`
-
-```python
-# Custom cache directory
-server = CachedSGLangServer(cache_dir="/path/to/cache")
-```
-
-### Verbosity
-
-```python
-# Disable cache statistics printing
-server = CachedSGLangServer(verbose=False)
-```
-
-### Manual Cache Management
-
-```python
-# Clear cache
-server.clear_cache()
-
-# Force cache flush (wait for async writes)
-server.shutdown()
-```
+- **Multi-language projects**: Access from any programming language via HTTP
 
 ## Development
 
 ### Running Tests
 
 ```bash
-# Unit tests (no SGLang server needed)
+# Unit tests (no servers needed)
 pytest tests/test_hashing.py tests/test_cache_manager.py
 
-# Integration tests (requires running SGLang server)
-# Start server first:
+# Integration tests (requires both servers running)
+# Terminal 1: Start SGLang server
 python -m sglang.launch_server --model-path TinyLlama/TinyLlama-1.1B-Chat-v1.0 --port 30000
 
-# Then run tests:
-pytest tests/test_integration.py
+# Terminal 2: Start wrapper server
+sglang-cached start --sglang-url http://localhost:30000 --port 30001 --cache-path /tmp/test_cache
+
+# Terminal 3: Run tests
+pytest tests/test_integration.py tests/test_http_server.py
 
 # All tests
 pytest tests/ -v
 ```
 
-### Code Structure
+### Project Structure
 
 ```
 sglang_cached/
 ├── __init__.py           # Package exports
 ├── hashing.py            # Cache key generation
 ├── cache_manager.py      # Cache storage & persistence
-├── server.py             # Main wrapper class
+├── server.py             # FastAPI HTTP server
 └── cli.py                # Command-line interface
 
 tests/
 ├── test_hashing.py       # Hash function tests
 ├── test_cache_manager.py # Cache logic tests
-└── test_integration.py   # End-to-end tests
+├── test_integration.py   # HTTP integration tests
+└── test_http_server.py   # Comprehensive HTTP API tests
+
+examples/
+├── curl_examples.sh      # curl usage examples
+└── curl_test_caching.sh  # Caching behavior demo
 ```
+
+## Examples
+
+See the `examples/` directory for:
+- `curl_examples.sh` - Comprehensive examples using curl
+- `curl_test_caching.sh` - Demonstrates caching behavior
 
 ## License
 
@@ -293,22 +361,9 @@ Contributions welcome! Please:
 
 ## Acknowledgments
 
-- Built on top of [SGLang](https://github.com/sgl-project/sglang)
+- Built on top of [SGLang](https://github.com/sgl-project/sglang) and [FastAPI](https://fastapi.tiangolo.com/)
 - Inspired by the need for fast iteration during LLM research
-
-## Citation
-
-If you use SGLang-Cached in your research, please cite:
-
-```bibtex
-@software{sglang_cached,
-  title = {SGLang-Cached: Response Caching for SGLang},
-  author = {SGLang-Cached Contributors},
-  year = {2025},
-  url = {https://github.com/yourusername/sglang-cached}
-}
-```
 
 ---
 
-Made with \ud83d\udc4d for faster LLM inference.
+Made for faster LLM inference.

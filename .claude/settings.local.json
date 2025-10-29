@@ -5,7 +5,8 @@
       "Bash(pip show:*)",
       "Bash(pip3 show:*)",
       "Bash(python:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(tree:*)"
     ],
     "deny": [],
     "ask": []
