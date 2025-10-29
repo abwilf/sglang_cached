@@ -8,7 +8,7 @@ underlying SGLang server while adding intelligent response caching.
 import sys
 from typing import Any, Dict, List, Optional, Union
 
-import requests
+import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -170,6 +170,9 @@ class CachedSGLangServer:
         self.verbose = verbose
         self.app = FastAPI(title="SGLang Cached Wrapper")
 
+        # Create async HTTP client for forwarding requests
+        self.http_client = httpx.AsyncClient(timeout=300.0)
+
         # Register routes
         self._setup_routes()
 
@@ -189,7 +192,7 @@ class CachedSGLangServer:
             Forwards requests to underlying SGLang server, using cache when possible.
             """
             request_data = await request.json()
-            return self._handle_generate(request_data)
+            return await self._handle_generate(request_data)
 
         @self.app.get("/cache/stats")
         async def cache_stats():
@@ -229,7 +232,7 @@ class CachedSGLangServer:
             sglang_request = openai_to_sglang(openai_request, is_chat=False)
 
             # Process with caching
-            sglang_response = self._handle_generate(sglang_request)
+            sglang_response = await self._handle_generate(sglang_request)
 
             # Transform back to OpenAI format
             model = openai_request.get("model", "sglang")
@@ -251,11 +254,11 @@ class CachedSGLangServer:
             sglang_request = openai_to_sglang(openai_request, is_chat=True)
 
             # Process with caching, but use chat completions endpoint
-            sglang_response = self._handle_chat_completions(openai_request, sglang_request)
+            sglang_response = await self._handle_chat_completions(openai_request, sglang_request)
 
             return sglang_response
 
-    def _handle_generate(self, request_data: Dict[str, Any]) -> Union[Dict, List[Dict]]:
+    async def _handle_generate(self, request_data: Dict[str, Any]) -> Union[Dict, List[Dict]]:
         """
         Handle a generate request with caching logic.
 
@@ -267,7 +270,7 @@ class CachedSGLangServer:
         """
         n = extract_n_parameter(request_data)
 
-        # Check cache
+        # Check cache (fast, returns immediately)
         cached_responses, num_needed = self.cache.get(request_data)
 
         if self.verbose:
@@ -275,7 +278,7 @@ class CachedSGLangServer:
             cache_status = "hit" if num_needed == 0 else "partial" if num_cached > 0 else "miss"
             print(f"[Cache {cache_status}] Cached: {num_cached}/{n}, Need: {num_needed}")
 
-        # If we need more responses, call SGLang
+        # If we need more responses, call SGLang asynchronously
         new_responses = []
         if num_needed > 0:
             # Create modified request for SGLang
@@ -291,12 +294,11 @@ class CachedSGLangServer:
             else:
                 sglang_request["sampling_params"] = {"n": num_needed}
 
-            # Call SGLang
+            # Call SGLang asynchronously
             try:
-                response = requests.post(
+                response = await self.http_client.post(
                     f"{self.sglang_url}/generate",
-                    json=sglang_request,
-                    timeout=300  # 5 minute timeout for long generations
+                    json=sglang_request
                 )
                 response.raise_for_status()
                 result = response.json()
@@ -310,7 +312,7 @@ class CachedSGLangServer:
                 # Update cache asynchronously with original request
                 self.cache.put(request_data, new_responses)
 
-            except requests.exceptions.RequestException as e:
+            except httpx.HTTPError as e:
                 raise HTTPException(
                     status_code=502,
                     detail=f"Failed to connect to SGLang server at {self.sglang_url}: {str(e)}"
@@ -325,7 +327,7 @@ class CachedSGLangServer:
         else:
             return all_responses
 
-    def _handle_chat_completions(self, openai_request: Dict[str, Any], cache_key_request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _handle_chat_completions(self, openai_request: Dict[str, Any], cache_key_request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a chat completions request with caching logic.
         Forwards to SGLang's /v1/chat/completions endpoint directly.
@@ -339,7 +341,7 @@ class CachedSGLangServer:
         """
         n = openai_request.get("n", 1)
 
-        # Check cache using the cache_key_request
+        # Check cache using the cache_key_request (fast, returns immediately)
         cached_responses, num_needed = self.cache.get(cache_key_request)
 
         if self.verbose:
@@ -347,19 +349,18 @@ class CachedSGLangServer:
             cache_status = "hit" if num_needed == 0 else "partial" if num_cached > 0 else "miss"
             print(f"[Cache {cache_status}] Cached: {num_cached}/{n}, Need: {num_needed}")
 
-        # If we need more responses, call SGLang's chat completions endpoint
+        # If we need more responses, call SGLang's chat completions endpoint asynchronously
         new_responses = []
         if num_needed > 0:
             # Create modified request for SGLang
             sglang_request = openai_request.copy()
             sglang_request["n"] = num_needed
 
-            # Call SGLang's /v1/chat/completions endpoint
+            # Call SGLang's /v1/chat/completions endpoint asynchronously
             try:
-                response = requests.post(
+                response = await self.http_client.post(
                     f"{self.sglang_url}/v1/chat/completions",
-                    json=sglang_request,
-                    timeout=300  # 5 minute timeout for long generations
+                    json=sglang_request
                 )
                 response.raise_for_status()
                 result = response.json()
@@ -377,7 +378,7 @@ class CachedSGLangServer:
                 if new_responses:
                     self.cache.put(cache_key_request, new_responses)
 
-            except requests.exceptions.RequestException as e:
+            except httpx.HTTPError as e:
                 raise HTTPException(
                     status_code=502,
                     detail=f"Failed to connect to SGLang server at {self.sglang_url}: {str(e)}"
@@ -423,6 +424,7 @@ class CachedSGLangServer:
         """
         uvicorn.run(self.app, host=host, port=port)
 
-    def shutdown(self):
-        """Shutdown the cache manager."""
+    async def shutdown(self):
+        """Shutdown the cache manager and HTTP client."""
         self.cache.shutdown()
+        await self.http_client.aclose()
