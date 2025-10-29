@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sglang-cached"
+version = "0.1.0"
+description = "Elegant response caching wrapper for SGLang inference"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "sglang-cached contributors"}
+]
+keywords = ["sglang", "llm", "inference", "caching", "ai", "machine-learning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "sglang>=0.4.0",
+    "requests>=2.25.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/sglang-cached"
+Documentation = "https://github.com/yourusername/sglang-cached#readme"
+Repository = "https://github.com/yourusername/sglang-cached"
+Issues = "https://github.com/yourusername/sglang-cached/issues"
+
+[project.scripts]
+sglang-cached = "sglang_cached.cli:main"
+
+[tool.setuptools]
+packages = ["sglang_cached"]
+
+[tool.setuptools.package-data]
+sglang_cached = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short"
