@@ -155,7 +155,8 @@ class CachedSGLangServer:
         self,
         sglang_url: str,
         cache_dir: Optional[str] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        overwrite_cache: bool = False
     ):
         """
         Initialize the cached server.
@@ -164,9 +165,10 @@ class CachedSGLangServer:
             sglang_url: URL of the underlying SGLang server
             cache_dir: Directory for cache storage (default: ~/.sglang_cache)
             verbose: Whether to print cache statistics
+            overwrite_cache: Whether to remove existing cache and start fresh
         """
         self.sglang_url = sglang_url.rstrip('/')
-        self.cache = CacheManager(cache_dir)
+        self.cache = CacheManager(cache_dir, overwrite=overwrite_cache)
         self.verbose = verbose
         self.app = FastAPI(title="SGLang Cached Wrapper")
 

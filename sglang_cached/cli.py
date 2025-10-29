@@ -66,6 +66,11 @@ def main():
         action="store_true",
         help="Disable verbose logging"
     )
+    start_parser.add_argument(
+        "--overwrite-cache",
+        action="store_true",
+        help="Remove existing cache and start fresh"
+    )
 
     args = parser.parse_args()
 
@@ -88,7 +93,8 @@ def main():
     cached_server = CachedSGLangServer(
         sglang_url=args.sglang_url,
         cache_dir=args.cache_path,
-        verbose=not args.quiet
+        verbose=not args.quiet,
+        overwrite_cache=args.overwrite_cache
     )
 
     print("\n" + "=" * 70)

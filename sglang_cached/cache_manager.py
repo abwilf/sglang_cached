@@ -25,12 +25,13 @@ class CacheManager:
     Multiple responses can be stored per key to handle different `n` values.
     """
 
-    def __init__(self, cache_dir: Optional[str] = None):
+    def __init__(self, cache_dir: Optional[str] = None, overwrite: bool = False):
         """
         Initialize the cache manager.
 
         Args:
             cache_dir: Directory to store cache file. Defaults to ~/.sglang_cache
+            overwrite: If True, remove existing cache file before loading
         """
         if cache_dir is None:
             cache_dir = os.path.expanduser("~/.sglang_cache")
@@ -51,6 +52,11 @@ class CacheManager:
         # Stats
         self._hits = 0
         self._misses = 0
+
+        # Remove existing cache if overwrite is requested
+        if overwrite and self.cache_file.exists():
+            self.cache_file.unlink()
+            print(f"Removed existing cache file: {self.cache_file}")
 
         # Load existing cache and start writer
         self._load_cache()
