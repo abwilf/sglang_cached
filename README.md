@@ -14,7 +14,7 @@ An HTTP wrapper server for [SGLang](https://github.com/sgl-project/sglang) that 
 ## Installation
 ```bash
 git clone git@github.com:abwilf/sglang_cached.git
-cd sglang-cached
+cd sglang_cached
 pip install -e .
 ```
 
